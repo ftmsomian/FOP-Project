@@ -11,7 +11,7 @@
 
 #define MAX_FILENAME_LENGTH 1000
 #define MAX_DIRECTORYNAME_LENGTH 1000
-#define MAX_COMMIT_MESSAGE_LENGTH 2000
+#define MAX_COMMIT_MESSAGE_LENGTH 72
 #define MAX_LINE_LENGTH 1000
 #define MAX_MESSAGE_LENGTH 1000
 #define MAX_MODIFIED_DATE_LENGTH 30
@@ -19,17 +19,29 @@
 bool global = false;
 
 
-int run_init(int argc , char* argv);
-int get_config(int argc , char* argv);
+int run_init(int argc , char* argv[]);
+int get_config(int argc , char* argv[]);
 int create_config(FILE* file);
-int run_add(int argc , char* argv);
+//
+int run_add(int argc , char* argv[]);
 int add_to_staging(char *filepath , char* modified_date);
-int check_for_existing(char* argv);
-int find_file_last_change_before_commit(char* filepath , int commit_ID);
-int run_reset(int argc , char* argv);
+//
+int check_for_existing(char* argv[]);
+//
+int run_commit(int argc , char*argv[]); //OK
+int inc_last_commit_ID();//ok
+int commit_staged_file(int commit_ID , char* filepath);//ok
+int track_file(char* filepath);//ok
+bool is_tracked(char* filepath);//ok
+int create_commit_file(int commit_ID , char* message);//OK
+int find_file_last_commit(char* filepath);//ok
+int find_file_last_change_before_commit(char* filepath , int commit_ID);//not sure
+//
+int run_reset(int argc , char* argv[]);
 int remove_from_staging(char* filepath);
-
-
+//
+int run_checkout(int argc , char* argv[]);
+int checkout_file(char *filepath , int commit_ID);
 
 
 
@@ -48,6 +60,8 @@ int main(int argc , char* argv[]){
         run_add(argc , argv);
     } else if(strcmp(argv[1] , "reset") == 0){
         run_reset(argc,argv);
+    } else if(strcmp(argv[1] , "commit") == 0){
+        run_commit(argc,argv);
     }
     return 0;
 }
@@ -60,7 +74,7 @@ int main(int argc , char* argv[]){
 
 
 
-int get_config(int argc , char* argv){
+int get_config(int argc , char* argv[]){
     
     if(argc<4){
         perror("enter a valid command!");
@@ -117,7 +131,7 @@ int get_config(int argc , char* argv){
     return 0;
 }
 
-int run_init(int argc , char* argv){
+int run_init(int argc , char* argv[]){
     if(argc < 3){
         perror("enter a valid command!");
     }
@@ -163,7 +177,7 @@ int create_config(FILE* file){
     fclose(output);
 }
 
-int run_add(int argc , char* argv){
+int run_add(int argc , char* argv[]){
     if(argc < 3){
         perror("enter a valid command!");
         return 1;
@@ -302,7 +316,7 @@ int add_to_staging(char *filepath , char* modified_date) {
     return 0;
 }
 
-int check_for_existing(char* argv){
+int check_for_existing(char* argv[]){
     char file_name[MAX_FILENAME_LENGTH];
     if(strcmp(argv[2] , ".") != 0 ){
         strcpy(file_name , argv[2]);
@@ -334,7 +348,7 @@ int check_for_existing(char* argv){
         }
     }
 }
-int run_reset(int argc , char* argv){
+int run_reset(int argc , char* argv[]){
     if(argc < 3){
         perror("enter a valid command!");
     }
@@ -396,5 +410,170 @@ int remove_from_staging(char* filepath){
 
     remove(filename);
     rename(tempfilename, filename);
+    return 0;
+}
+int run_commit(int argc , char*argv[]){
+    if(argc < 4){
+        perror("use the correct format please!");
+        return 1;
+    }
+    char message[MAX_COMMIT_MESSAGE_LENGTH];
+    strcpy(message,argv[3]);
+    int commit_ID = inc_last_commit_ID();
+    if(commit_ID == -1) return 1;
+    FILE* file = fopen(".neogit/staging.txt" , "r");
+    if(file == NULL) return 1;
+    char line[MAX_LINE_LENGTH];
+    while(fgets(line , sizeof(line) , file) != NULL){
+        int length = strlen(line);
+        if(line[length-1] == '\n'){
+            line[length-1] = '\0';
+        }
+        if(!check_for_existing(line)){
+            char dir_path[MAX_FILENAME_LENGTH];
+            strcpy(dir_path , ".neogit/files/");
+            strcat(dir_path , line);
+            if(mkdir(dir_path , 0755) != 0) return 1;
+        }
+        commit_staged_file(commit_ID,line);
+        track_file(line);
+    }
+    fclose(file);
+    file = fopen(".neogit/staging.txt" , "w");
+    if(file == NULL) return 1;
+    fclose(file);
+    create_commit_file(commit_ID , message);
+    fprintf(stdout , "commit successfuly with commit ID %d" , commit_ID);
+    return 0;
+}
+int create_commit_file(int commit_ID , char* message){
+    char commit_filepath[MAX_FILENAME_LENGTH];
+    strcpy(commit_filepath , ".neogit/commits/");
+    char temp[18];
+    sprintf(tmo,"%d" , commit_ID);
+    strcat(commit_filepath , temp);
+    FILE *file = fopen(commit_filepath , "w");
+    if(file == NULL) return 1;
+    fprintf(file , "message: %s\n" , message);
+    fprintf(file , "files:\n");
+    DIR *dir = opendir(".");
+    struct dirent *entry;
+    if(dir == NULL){
+        perror("Eroor opening current directory");
+        return 1;
+    }
+    while((entry = readdir(dir)) != NULL){
+        if(entry->d_type == DT_REG && is_tracked(entry->d_name)){
+            int file_last_commit_ID = find_file_last_commit(entry->d_name);
+            fprintf(file , "%s %s\n" , entry->d_name , file_last_commit_ID);
+        }
+    }
+    closedir(dir);
+    fclose(file);
+    return 0;
+}
+int find_file_last_commit(char* filepath){
+    char filepath_dir[MAX_FILENAME_LENGTH];
+    strcpy(filepath_dir , ".neogit/files/file/");
+    strcat(filepath_dir , filepath);
+    int max = -1;
+    DIR* dir = opendir(filepath_dir);
+    struct dirent *entry;
+    if(dir == NULL) return 1;
+    while((entry = readdir(dir)) == NULL){
+        if(entry->d_type == DT_REG){
+            int tmp = atoi(entry->d_name);
+            max = max>tmp ? max : tmp;
+        }
+    }
+    closedir(dir);
+    return max;
+}
+int inc_last_commit_ID(){
+    FILE* file = fopen(".neogit/configs" , "w");
+    if(file == NULL) return -1;
+
+    FILE *tmp_file = fopen(".neogit/tmp_configs" , "w");
+    if(tmp_file == NULL) return -1;
+
+    int last_commit_ID;
+    char line[MAX_LINE_LENGTH];
+    while(fgets(line , sizeof(line) , file) != NULL){
+        if(strncmp(line , "last_commit_ID" , 14) == 0){
+            sscanf(line , "last_commit_ID: %d\n" , &last_commit_ID);
+            last_commit_ID++;
+            fprintf(tmp_file , "last_commit_ID: %d\n" , last_commit_ID);
+        } else fprintf(tmp_file , "%s" , line);
+    }
+    fclose(file);
+    fclose(tmp_file);
+    remove(".neogit/configs");
+    rename(".neogit/tmp_configs" ,".neogit/configs" );
+    return last_commit_ID;
+}
+int find_file_last_change_before_commit(char* filepath , int commit_ID){
+    char filepath_dir[MAX_FILENAME_LENGTH];
+    strcpy(filepath_dir, ".neogit/files/");
+    strcat(filepath_dir , filepath);
+    int max = -1;
+    DIR* dir = opendir(filepath_dir);
+    if(dir == NULL) return 1;
+    struct dirent *entry;
+    while((entry = readdir(dir)) == NULL){
+        if(entry->d_type == DT_REG){
+            int tmp = atoi(entry->d_name);
+            max = max>tmp ? max : tmp;
+        }
+    }
+    closedir(dir);
+    return max;
+
+}
+bool is_tracked(char* filepath){
+    FILE* file = fopen(".neogit/tracks" , "r");
+    if(file == NULL) return false;
+    char line[MAX_LINE_LENGTH];
+    while(fgets(line , sizeof(line) , file) != NULL){
+        int length = strlen(line);
+        if(line[length-1] == '\n'){
+            line[length-1] == '\0';
+        }
+        if(strcmp(line , filepath) == 0) return true;
+        break;
+
+    }
+    fclose(file);
+    return false;
+}
+int track_file(char* filepath){
+    if(is_tracked(filepath)) return 0;
+    FILE* file = fopen(".neogit/tracks" , "a");
+    if(file == NULL) return 1;
+    fprintf(file , "%s\n" , filepath);
+    return 0;
+}
+int commit_staged_file(int commit_ID , char* filepath){
+    FILE *read_file,*write_file;
+    char read_path[MAX_FILENAME_LENGTH];
+    strcpy(read_path , filepath);
+    char write_path[MAX_FILENAME_LENGTH];
+    strcpy(write_path , ".neogit/files/");
+    strcat(write_path , filepath);
+    strcat(write_path , "/");
+    char tmp[10];
+    sprintf(tmp , "%d" , commit_ID);
+    strcat(write_path , tmp);
+
+    read_file = fopen(read_path , "r");
+    if(read_file == NULL) return 1;
+    write_file = fopen(write_path , "w");
+    if(write_file == NULL) return 1;
+    char buffer = fgetc(read_file);
+    while(buffer != EOF){
+        fputs(buffer , write_file);
+        buffer = fgetc(read_file);
+    }
+    fclose(read_file);
+    fclose(write_file);
     return 0;
 }
