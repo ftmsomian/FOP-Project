@@ -449,8 +449,8 @@ int run_commit(int argc , char*argv[]){
 int create_commit_file(int commit_ID , char* message){
     char commit_filepath[MAX_FILENAME_LENGTH];
     strcpy(commit_filepath , ".neogit/commits/");
-    char temp[18];
-    sprintf(tmo,"%d" , commit_ID);
+    char temp[10];
+    sprintf(temp,"%d" , commit_ID);
     strcat(commit_filepath , temp);
     FILE *file = fopen(commit_filepath , "w");
     if(file == NULL) return 1;
