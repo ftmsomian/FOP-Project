@@ -5,9 +5,10 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <time.h>
+
 
 #define MAX_FILENAME_LENGTH 1000
 #define MAX_DIRECTORYNAME_LENGTH 1000
@@ -36,6 +37,7 @@ bool is_tracked(char* filepath);//ok
 int create_commit_file(int commit_ID , char* message);//OK
 int find_file_last_commit(char* filepath);//ok
 int find_file_last_change_before_commit(char* filepath , int commit_ID);//not sure
+bool check_file_directory_exists_for_commit(char* filepath);//ok
 //
 int run_reset(int argc , char* argv[]);
 int remove_from_staging(char* filepath);
@@ -62,6 +64,8 @@ int main(int argc , char* argv[]){
         run_reset(argc,argv);
     } else if(strcmp(argv[1] , "commit") == 0){
         run_commit(argc,argv);
+    }else if(strcmp(argv[1] , "checkout") == 0){
+        run_checkout(argc,argv);
     }
     return 0;
 }
@@ -159,7 +163,7 @@ int run_init(int argc , char* argv[]){
     if(exist){
         perror("neogit repo already exists!");
     } else{
-        if(mkdir(".neogit" , 0755) != 0) return 1;
+        if(mkdir(".neogit") != 0) return 1;
         create_config("set_configs.txt");
         FILE* file1 = fopen(".neogit/staging" , "w");
     }
@@ -174,6 +178,7 @@ int create_config(FILE* file){
     fprintf(output , "username : %s\n" , username);
     fprintf(output , "email : %s\n" , email);
     fprintf(output,"branch : master\n");
+    fprintf(output,"last_commit_ID : 0\n");
     fclose(output);
 }
 
@@ -429,11 +434,11 @@ int run_commit(int argc , char*argv[]){
         if(line[length-1] == '\n'){
             line[length-1] = '\0';
         }
-        if(!check_for_existing(line)){
+        if(!check_file_directory_exists_for_commit(line)){
             char dir_path[MAX_FILENAME_LENGTH];
             strcpy(dir_path , ".neogit/files/");
             strcat(dir_path , line);
-            if(mkdir(dir_path , 0755) != 0) return 1;
+            if(mkdir(dir_path ) != 0) return 1;
         }
         commit_staged_file(commit_ID,line);
         track_file(line);
@@ -575,5 +580,49 @@ int commit_staged_file(int commit_ID , char* filepath){
     }
     fclose(read_file);
     fclose(write_file);
+    return 0;
+}
+bool check_file_directory_exists_for_commit(char* filepath){
+    DIR* dir = opendir("./neogit/filoes");
+    struct dirent* entry;
+    if(dir == NULL) return 1;
+    while((entry = readdir(dir)) != NULL){
+        if(entry->d_type==DT_DIR && strcmp(entry->d_name , filepath) == 0) return true;
+        break;
+    }
+    closedir(dir);
+    return false;
+}
+int run_checkout(int argc , char* argv[]){
+    if(argc < 3){
+        perror("enter a valid command!");
+        return 1;
+    }
+    int commit_ID = atoi(argv[2]);
+    DIR* dir = opendir(".");
+    struct dirent* entry;
+    while((entry = readdir(dir)) != NULL){
+        if((entry->d_type == DT_REG) && is_tracked(entry->d_name)){
+            checkout_file(entry->d_name,find_file_last_change_before_commit(entry->d_name,commit_ID));
+        }
+    }
+    closedir(dir);
+    return 0;
+}
+int checkout_file(char *filepath , int commit_ID){
+    char sourceFile[MAX_FILENAME_LENGTH];
+    strcpy(sourceFile,".neogit/files/");
+    strcat(sourceFile , filepath);
+    char tmp[20];
+    sprintf(tmp , "/%d" , commit_ID);
+    strcat(sourceFile , tmp);
+    FILE* readFile = fopen(sourceFile , "r");
+    FILE* writeFile = fopen(filepath , "w");
+    char line[MAX_LINE_LENGTH];
+    while(fgets(line , sizeof(line) , readFile) != NULL){
+        fprintf(writeFile , "%s" , line);
+    }
+    fclose(readFile);
+    fclose(writeFile);
     return 0;
 }
