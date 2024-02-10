@@ -1,3 +1,5 @@
+//fatemeh masoomian
+//402106529
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
